@@ -122,6 +122,7 @@ class Litter(object):
         elif inputfile:
             self.inputfile = inputfile
         self.inputfilename = self.inputfile.name
+        sys.path.append(os.path.abspath('.'))
         if outputfilename:
             self.outputfile = open(outputfilename,'wb')
         elif outputfile:
