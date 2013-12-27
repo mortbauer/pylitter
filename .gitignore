@@ -6,4 +6,6 @@ __pycache__
 sinus.png
 test.markdown
 test.md
-test.pdf
+*.pdf
+test.tex
+*.png

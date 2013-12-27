@@ -18,6 +18,7 @@ class Visitor(ast.NodeTransformer):
         self.inputfilename = inputfilename
         self.logger = logger
         self.CodeChunk = collections.namedtuple('CodeChunk',['codeobject','source','assign'])
+        self.interactive = False
 
     def _get_last_lineno(self,node):
         maxlineno = 0
@@ -110,7 +111,7 @@ class Visitor(ast.NodeTransformer):
 
 
 class Litter(object):
-    def __init__(self,figdir='',stop_on_error=True,ipython_style=False,loglevel='WARNING',inputfilename='',inputfile=None,outputfilename='',outputfile=None):
+    def __init__(self,figdir='',stop_on_error=True,ipython_style=False,loglevel='WARNING',inputfilename='',inputfile=None,outputfilename='',outputfile=None,**kwargs):
         self.plt = None
         if figdir:
             self._figdir = figdir
@@ -120,6 +121,7 @@ class Litter(object):
             self.inputfile = open(inputfilename,'r')
         elif inputfile:
             self.inputfile = inputfile
+        self.inputfilename = self.inputfile.name
         if outputfilename:
             self.outputfile = open(outputfilename,'wb')
         elif outputfile:
@@ -195,20 +197,27 @@ class Litter(object):
             if num > 1:
                 self.logger.error('there are several figures in this chunks, not supported so far')
             else:
-                label = self._get_label(result)
-                fig = self.plt.figure(num)
-                name = '{0}.png'.format(label)
-                figpath =os.path.join(self.figdir,name)
-                fig.savefig(figpath)
-                ref = '\n![{label}\label{{{label}}}]({path})\n'.format(label=label,path=figpath)
-                self.logger.info('saved figure "{0}" to "{1}"'.format(label,figpath))
-                self.reference[label] = figpath
-                yield (False,ref)
+                label,desc = self._get_label(result)
+                if label:
+                    fig = self.plt.figure(num)
+                    name = '{0}.png'.format(label)
+                    figpath =os.path.join(self.figdir,name)
+                    fig.savefig(figpath)
+                    ref = '\n![{desc}\label{{{label}}}]({path})\n'.format(label=label,desc=desc,path=figpath)
+                    self.logger.info('saved figure "{0}" to "{1}"'.format(label,figpath))
+                    self.reference[label] = figpath
+                    yield (False,ref)
 
     def _get_label(self,result):
         if '#:' in result.codechunk.source:
             s = result.codechunk.source
-            return s[s.find('#:')+2:]
+            t = s[s.find('#:')+2:]
+            if ':' in t:
+                return t.split(':')
+            else:
+                return t,t
+        else:
+            return None,None
 
     def process(self):
         for (linenumber,code,source) in self.chunks():
@@ -301,7 +310,7 @@ class Litter(object):
             # remove all line until a line containing rstscript.dynamic except
             # the first
             st = tr.find('\n')+1
-            en = tr.find('File "{0}"'.format(self.filename))
+            en = tr.find('File "{0}"'.format(self.inputfilename))
             self.traceback.write(tr[:st])
             self.traceback.write(tr[en:])
         finally:
@@ -329,6 +338,8 @@ process = Dispatcher(globaloptions=[
     ('s','stop-on-error',False,'stop if an error occurs'),
     ('l','loglevel','WARNING','set the log level'),
     ('i','ipython-style',False,'ipython in out style'),
+    ('h','highlighting-style','pygments','highlighting style'),
+    ('v','version','0.0.1','version of the file'),
 ])
 
 d = Dispatcher()
@@ -348,15 +359,17 @@ def process_md(inputfilename,outputfilename='',**kwargs):
 
 
 @process.command(name='pdf',usage='inputfile -o outpufile')
-def pdf_pdf(inputfilename,outputfilename,**kwargs):
+def process_pdf(inputfilename,outputfilename,**kwargs):
     from sh import pandoc
     import tempfile
     with tempfile.NamedTemporaryFile() as tmp:
         li = Litter(outputfile=tmp.file,inputfilename=inputfilename,figdir=os.path.abspath(os.path.dirname(outputfilename)),**kwargs)
         li.format()
+        tmp.file.flush()
+        kwargs.get('version')
         pandoc(tmp.name,'-o',outputfilename,
             '--template',os.path.join(
-                os.path.dirname(__file__),'data','template.tex'))
+                os.path.dirname(__file__),'data','template.tex'),'-V','version=%s'%kwargs.get('version'),'--highlight-style',kwargs.get('highlighting_style'))
 
 
 @d.command(usage='input output')
@@ -365,7 +378,7 @@ def mdto(inputfilename,outputfilename,highlight='pygments'):
     from sh import pandoc
     pandoc(inputfilename,'-o',outputfilename,'--highlight-style',highlight,
         '--template',os.path.join(
-            os.path.dirname(__file__),'data','template.tex'))
+            os.path.dirname(__file__),'data','template.tex'),'-V','version=0.0.1')
 
 
 def main():

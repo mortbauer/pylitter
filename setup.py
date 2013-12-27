@@ -10,6 +10,10 @@ setup(name='pylitter',
       packages=['pylitter'],
       package_data={'pylitter':['data/template.tex']},
       provides='pylitter',
+      install_requires=[
+        "opster",
+        "sh",
+      ],
       classifiers=[
         'Development Status :: Alpha',
         'Topic :: Text Processing :: Markup',
