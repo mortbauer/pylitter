@@ -3,6 +3,9 @@ from matplotlib import pyplot as plt#>
 
 ## Some example file
 a = 2
+b = a * 4 +5
+c = a +b/5
+b
 #a = {[a]} is an important variable
 x = np.arange(0,1,0.01)#>
 plt.plot(x,np.sin(x))#:sinus
