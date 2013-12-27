@@ -1,0 +1,9 @@
+*egg-info
+venv
+venv2
+__pycache__
+*.pyc
+sinus.png
+test.markdown
+test.md
+test.pdf
