@@ -26,7 +26,7 @@ class Visitor(ast.NodeTransformer):
                 maxlineno = x.lineno
         return maxlineno
 
-    def _autoprint(self,node):
+    def _autoprint(self ,node):
         # implement autoprinting discovery
         if type(node) == ast.Assign:
             # test if simple assignement or trough some expression
@@ -38,14 +38,14 @@ class Visitor(ast.NodeTransformer):
                 if hasattr(node.targets[0],'id'):
                     return node.targets[0].id
 
-    def _compile(self,node):
+    def _compile(self,node,auto=None):
         try:
             codeobject = compile(ast.Module([node]),self.inputfilename,'exec')
         except:
             self.logger.exception(
                 'failed to compile "{0}", {1}'.format(
                     node,traceback.format_exc()))
-        auto = self._autoprint(node)
+        #auto = self._autoprint(node)
         return self.CodeChunk(codeobject,node.source,auto)
 
     def _import_matplotlib(self,modpart):
@@ -80,6 +80,14 @@ class Visitor(ast.NodeTransformer):
             yield newnode
         yield self._compile(node)
 
+
+    def visit_Expr(self,node):
+        if type(node.value) == ast.Name:
+            yield self._compile(node,auto=node.value.id)
+        else:
+            yield self._compile(node)
+
+
     def visit(self, node, start_lineno,raw,depth=0):
         """Visit a node."""
         if depth >= self.maxdepth:
@@ -102,7 +110,7 @@ class Visitor(ast.NodeTransformer):
 
 
 class Litter(object):
-    def __init__(self,figdir='',stop_on_error=True,loglevel='WARNING',inputfilename='',inputfile=None,outputfilename='',outputfile=None):
+    def __init__(self,figdir='',stop_on_error=True,ipython_style=False,loglevel='WARNING',inputfilename='',inputfile=None,outputfilename='',outputfile=None):
         self.plt = None
         if figdir:
             self._figdir = figdir
@@ -127,6 +135,7 @@ class Litter(object):
         self.visitor = Visitor(self.inputfile.name,self.logger)
         self.globallocal = {}
         self.autoprinting = True
+        self.ipythonstyle = ipython_style
         self.stderr = io.StringIO()
         self.stdout = io.StringIO()
         self.traceback = io.StringIO()
@@ -249,9 +258,16 @@ class Litter(object):
 
     def format_result(self,out,res):
         if not '#>' in res.codechunk.source and res.codechunk.source:
-            out.write(res.codechunk.source)
-            out.write('\n')
+            if self.ipythonstyle:
+                out.write('In [{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
+                out.write(res.codechunk.source)
+                out.write('\n')
+            elif not res.codechunk.assign:
+                out.write(res.codechunk.source)
+                out.write('\n')
         if res.stdout:
+            if self.ipythonstyle:
+                out.write('Out[{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
             out.write(res.stdout)
             out.write('\n')
         if res.stderr:
@@ -260,11 +276,14 @@ class Litter(object):
         if res.traceback:
             out.write(res.traceback)
             out.write('\n')
-        elif self.autoprinting and res.codechunk.assign and \
-                '##' in res.codechunk.source:
+        elif self.autoprinting and res.codechunk.assign:
             coa = res.codechunk.assign
             result = self.globallocal[coa]
-            out.write('{0} = {1}'.format(coa,result))
+            if self.ipythonstyle:
+                out.write('Out[{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
+                out.write(str(result))
+            else:
+                out.write('{0} = {1}'.format(coa,result))
             out.write('\n')
 
 
@@ -309,6 +328,7 @@ class Litter(object):
 process = Dispatcher(globaloptions=[
     ('s','stop-on-error',False,'stop if an error occurs'),
     ('l','loglevel','WARNING','set the log level'),
+    ('i','ipython-style',False,'ipython in out style'),
 ])
 
 d = Dispatcher()
