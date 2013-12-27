@@ -233,15 +233,9 @@ class Litter(object):
             if not code:
                 if wascode and tmp.tell():
                     val = tmp.getvalue()
-                    if val.count('\n') > 3:
-                        self.outputfile.write(b'```python\n')
-                        self.outputfile.write(val.encode('utf-8'))
-                        self.outputfile.write(b'```\n')
-                    else:
-                        self.outputfile.write(b'\n')
-                        self.outputfile.write(textwrap.indent(val,'    ').encode('utf-8'))
-                        self.outputfile.write(b'\n')
-
+                    self.outputfile.write(b'\n~~~python\n')
+                    self.outputfile.write(val.encode('utf-8'))
+                    self.outputfile.write(b'~~~\n\n')
                     tmp.seek(0)
                     tmp.truncate()
                     wascode = False
@@ -270,7 +264,7 @@ class Litter(object):
                 '##' in res.codechunk.source:
             coa = res.codechunk.assign
             result = self.globallocal[coa]
-            out.write('    {0} = {1}'.format(coa,result))
+            out.write('{0} = {1}'.format(coa,result))
             out.write('\n')
 
 
@@ -346,10 +340,10 @@ def pdf_pdf(inputfilename,outputfilename,**kwargs):
 
 
 @d.command(usage='input output')
-def mdtopdf(inputfilename,outputfilename):
+def mdto(inputfilename,outputfilename,highlight='pygments'):
     """ convert markdown to pdf using pandoc"""
     from sh import pandoc
-    pandoc(inputfilename,'-o',outputfilename,
+    pandoc(inputfilename,'-o',outputfilename,'--highlight-style',highlight,
         '--template',os.path.join(
             os.path.dirname(__file__),'data','template.tex'))
 
