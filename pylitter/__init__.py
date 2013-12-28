@@ -8,6 +8,7 @@ import traceback
 import collections
 from opster import command, dispatch, Dispatcher
 
+
 class Visitor(ast.NodeTransformer):
     """ special ast visitor, parses code chunks from string into single code
     objects do not set maxdepth bigger than 1, except you know what you do, but
@@ -17,7 +18,8 @@ class Visitor(ast.NodeTransformer):
         self.maxdepth = maxdepth
         self.inputfilename = inputfilename
         self.logger = logger
-        self.CodeChunk = collections.namedtuple('CodeChunk',['codeobject','source','assign'])
+        self.CodeChunk = collections.namedtuple(
+            'CodeChunk',['codeobject','source','mode'])
         self.interactive = False
 
     def _get_last_lineno(self,node):
@@ -39,15 +41,18 @@ class Visitor(ast.NodeTransformer):
                 if hasattr(node.targets[0],'id'):
                     return node.targets[0].id
 
-    def _compile(self,node,auto=None):
+    def _compile(self,node,mode='exec'):
         try:
-            codeobject = compile(ast.Module([node]),self.inputfilename,'exec')
+            if mode == 'exec':
+                codeobject = compile(ast.Module([node]),self.inputfilename,'exec')
+            else:
+                codeobject = compile(ast.Expression(node),self.inputfilename,'eval')
+            return self.CodeChunk(codeobject,node.source,mode)
         except:
             self.logger.exception(
                 'failed to compile "{0}", {1}'.format(
                     node,traceback.format_exc()))
-        #auto = self._autoprint(node)
-        return self.CodeChunk(codeobject,node.source,auto)
+            return self.CodeChunk(None,node.source,mode)
 
     def _import_matplotlib(self,modpart):
         if not 'matplotlib.pyplot' in sys.modules:
@@ -55,7 +60,7 @@ class Visitor(ast.NodeTransformer):
             ' before to choose backend "Agg"'.format(modpart))
             return self.CodeChunk(
                     compile('import matplotlib;matplotlib.use("Agg")',
-                        '<rstscript.dynamic>','exec'),'','')
+                        '<rstscript.dynamic>','exec'),'','exec')
         else:
             self.logger.info('detected import of matplotlib.pyplot, '
             'but backend was already choosen')
@@ -83,11 +88,10 @@ class Visitor(ast.NodeTransformer):
 
 
     def visit_Expr(self,node):
-        if type(node.value) == ast.Name:
-            yield self._compile(node,auto=node.value.id)
-        else:
-            yield self._compile(node)
-
+        nnode = node.value
+        nnode.source = node.source
+        nnode.lineno = node.lineno
+        yield self._compile(nnode,mode='eval')
 
     def visit(self, node, start_lineno,raw,depth=0):
         """Visit a node."""
@@ -145,7 +149,7 @@ class Litter(object):
         self.stdout_sys = sys.stdout
         self.stderr_sys = sys.stderr
         self.ResultChunk = collections.namedtuple(
-            'ResultChunk',['codechunk','stderr','stdout','traceback'])
+            'ResultChunk',['codechunk','stderr','stdout','traceback','out'])
         self.results = {}
         self.stop_on_error = stop_on_error
         self.reference = {}
@@ -272,12 +276,10 @@ class Litter(object):
                 out.write('In [{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
                 out.write(res.codechunk.source)
                 out.write('\n')
-            elif not res.codechunk.assign:
+            elif not res.codechunk.mode == 'eval':
                 out.write(res.codechunk.source)
                 out.write('\n')
         if res.stdout:
-            if self.ipythonstyle:
-                out.write('Out[{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
             out.write(res.stdout)
             out.write('\n')
         if res.stderr:
@@ -286,16 +288,22 @@ class Litter(object):
         if res.traceback:
             out.write(res.traceback)
             out.write('\n')
-        elif self.autoprinting and res.codechunk.assign:
-            coa = res.codechunk.assign
-            result = self.globallocal[coa]
+        elif self.autoprinting and res.codechunk.mode == 'eval' and \
+                not '#>' in res.codechunk.source:
+            line = res.codechunk.codeobject.co_firstlineno
+            coa = res.codechunk.source
+            result = res.out
             if self.ipythonstyle:
-                out.write('Out[{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
-                out.write(str(result))
+                try:
+                    out.write('Out[{0}]: {1:.5g}'.format(line,result))
+                except:
+                    out.write('Out[{0}]: {1}'.format(line,result))
             else:
-                out.write('{0} = {1}'.format(coa,result))
+                try:
+                    out.write('{0} => {1:.5g}'.format(coa,result))
+                except:
+                    out.write('{0} => {1}'.format(coa,result))
             out.write('\n')
-
 
     def execute(self,codechunk):
         sys.stdout = self.stdout
@@ -304,8 +312,13 @@ class Litter(object):
         self.stderr.seek(0)
         self.traceback.seek(0)
         tr = ''
+        out = None
         try:
-            exec(codechunk.codeobject,self.globallocal,self.globallocal)
+            if codechunk.mode == 'exec':
+                exec(codechunk.codeobject,self.globallocal,self.globallocal)
+            elif codechunk.mode == 'eval':
+                out=eval(codechunk.codeobject,self.globallocal,self.globallocal)
+
         except:
             tr = traceback.format_exc().strip()
             # remove all line until a line containing rstscript.dynamic except
@@ -325,7 +338,7 @@ class Litter(object):
         self.stderr.truncate()
         rc = self.ResultChunk(
             codechunk,self.stderr.getvalue(),
-            self.stdout.getvalue(),self.traceback.getvalue()
+            self.stdout.getvalue(),self.traceback.getvalue(),out,
         )
         self.stderr.seek(0)
         self.stderr.truncate()
