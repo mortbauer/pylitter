@@ -205,7 +205,7 @@ class Litter(object):
                 label,desc = self._get_label(result)
                 if label:
                     fig = self.plt.figure(num)
-                    name = '{0}.png'.format(label)
+                    name = '{0}.pdf'.format(label)
                     figpath =os.path.join(self.figdir,name)
                     fig.savefig(figpath)
                     ref = '\n![{desc}\label{{{label}}}]({path})\n'.format(label=label,desc=desc,path=figpath)
@@ -252,21 +252,26 @@ class Litter(object):
     def format(self):
         wascode = False
         tmp = io.StringIO()
+        def writetmp(tmp):
+            val = tmp.getvalue()
+            if val:
+                self.outputfile.write(b'\n~~~python\n')
+                self.outputfile.write(val.encode('utf-8'))
+                self.outputfile.write(b'~~~\n\n')
+                tmp.seek(0)
+                tmp.truncate()
+
         for (code,result) in self.process():
             if not code:
                 if wascode and tmp.tell():
-                    val = tmp.getvalue()
-                    self.outputfile.write(b'\n~~~python\n')
-                    self.outputfile.write(val.encode('utf-8'))
-                    self.outputfile.write(b'~~~\n\n')
-                    tmp.seek(0)
-                    tmp.truncate()
+                    writetmp(tmp)
                     wascode = False
                 if not '#>' in result:
                     self.outputfile.write(result.encode('utf-8'))
             else:
                 wascode = True
                 self.format_result(tmp,result)
+        writetmp(tmp)
         for (label,ref) in self.reference.items():
             self.outputfile.write('\n[{0}]: {1}\n'.format(label,ref).encode('utf-8'))
 
