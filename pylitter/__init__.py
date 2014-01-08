@@ -213,6 +213,7 @@ class Litter(object):
                     ref = '\n![{desc}\label{{{label}}}]({path})\n'.format(label=label,desc=desc,path=figpath)
                     self.logger.info('saved figure "{0}" to "{1}"'.format(label,figpath))
                     self.reference[label] = figpath
+                    self.plt.close(num)
                     yield (False,ref)
 
     def _get_label(self,result):
