@@ -169,7 +169,9 @@ class Litter(object):
                     chunk.truncate()
                     code = not code
                     linenumber = i+1
-                if line.startswith('#') and not line.startswith('#coding'):
+                if not line.startswith('#coding'):
+                        continue
+                elif line.startswith('#'):
                     chunk.write(line[1:])
                 else:
                     chunk.write(line)
