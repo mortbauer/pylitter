@@ -294,7 +294,7 @@ class Litter(object):
             out.write(res.traceback)
             out.write('\n')
         elif self.autoprinting and res.codechunk.mode == 'eval' and \
-                not '#>' in res.codechunk.source:
+                not '#>' in res.codechunk.source and not '#:' in res.codechunk.source:
             line = res.codechunk.codeobject.co_firstlineno
             coa = res.codechunk.source
             result = res.out
