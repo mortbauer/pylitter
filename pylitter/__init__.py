@@ -8,6 +8,25 @@ import traceback
 import collections
 from opster import command, dispatch, Dispatcher
 
+def interactive():
+    if sys.flags.interactive:
+        return True
+    else:
+        try:
+            __IPYTHON__
+            return True
+        except:
+            return False
+
+def figure(plot,name,desc,float=True):
+    if interactive():
+        import matplotlib
+        matplotlib.interactive(True)
+        plot.show()
+    else:
+        print('#########')
+
+
 
 class Visitor(ast.NodeTransformer):
     """ special ast visitor, parses code chunks from string into single code
@@ -402,6 +421,10 @@ def mdto(inputfilename,outputfilename,highlight='pygments'):
         '--template',os.path.join(
             os.path.dirname(__file__),'data','template.tex'),'-V','version=0.0.1')
 
+@d.command(usage='input')
+def run(inputfilename):
+    from sh import python
+    python('-i',inputfilename)
 
 def main():
     d.dispatch()
