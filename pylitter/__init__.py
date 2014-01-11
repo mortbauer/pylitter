@@ -1,3 +1,5 @@
+#coding=utf-8
+
 import os
 import io
 import ast
@@ -8,7 +10,15 @@ import traceback
 import collections
 from opster import command, dispatch, Dispatcher
 
-def interactive():
+AUTO_PRINT = '#+'
+
+def get_markup():
+    try:
+        return globals()['__MARKUP__']
+    except:
+        return None
+
+def is_interactive():
     if sys.flags.interactive:
         return True
     else:
@@ -18,14 +28,41 @@ def interactive():
         except:
             return False
 
-def figure(plot,name,desc,float=True):
-    if interactive():
-        import matplotlib
-        matplotlib.interactive(True)
-        plot.show()
-    else:
-        print('#########')
+def get_figure(plot):
+    import matplotlib
+    if isinstance(plot,matplotlib.axes.Subplot):
+        return plot.get_figure()
+    elif isinstance(plot,matplotlib.figure.Figure):
+        return plot
 
+FIGURE_LATEX = """\n\\begin{{figure}}[h]
+\includegraphics[width=\\textwidth]{{{path}}}
+\caption{{{caption}}}
+\label{{{label}}}
+\end{{figure}}\n"""
+
+PREAMBLE = """\documentclass{article}
+\\usepackage{fancyvrb}
+\\usepackage{color}
+\\usepackage[utf8]{inputenc}
+\\usepackage{graphicx}
+\\usepackage[margin=2cm]{geometry}
+"""
+
+def figure(plot,name,desc,float=True):
+    import matplotlib
+    if is_interactive():
+        matplotlib.interactive(True)
+        get_figure(plot).show()
+    else:
+        markup = get_markup()
+        fig = get_figure(plot)
+        fig.savefig(name)
+        matplotlib.pyplot.close(fig.number)
+        if markup == 'LATEX':
+            return FIGURE_LATEX.format(path=name,caption=desc,label=os.path.splitext(name)[0])
+        elif markup == 'MARKDOWN':
+            return '\n![{desc}\label{{{label}}}]({path})\n'.format(label=name,desc=desc,path=name)
 
 
 class Visitor(ast.NodeTransformer):
@@ -47,18 +84,6 @@ class Visitor(ast.NodeTransformer):
             if hasattr(x,'lineno') and x.lineno > maxlineno:
                 maxlineno = x.lineno
         return maxlineno
-
-    def _autoprint(self ,node):
-        # implement autoprinting discovery
-        if type(node) == ast.Assign:
-            # test if simple assignement or trough some expression
-            bmc = []
-            for x in ast.iter_child_nodes(node):
-                if not type(x) in (ast.Name,ast.Num,ast.Str):
-                    bmc.append(x)
-            if len(bmc)>0:
-                if hasattr(node.targets[0],'id'):
-                    return node.targets[0].id
 
     def _compile(self,node,mode='exec'):
         try:
@@ -107,10 +132,29 @@ class Visitor(ast.NodeTransformer):
 
 
     def visit_Expr(self,node):
-        nnode = node.value
-        nnode.source = node.source
-        nnode.lineno = node.lineno
-        yield self._compile(nnode,mode='eval')
+        if AUTO_PRINT in node.source:
+            nnode = node.value
+            nnode.source = node.source
+            nnode.lineno = node.lineno
+            yield self._compile(nnode,mode='eval')
+        else:
+            yield self._compile(node)
+
+    def visit_Assign(self,node):
+        yield self._compile(node)
+        if AUTO_PRINT in node.source:
+            if isinstance(node.targets[0],ast.Tuple):
+                for x in node.targets[0].elts:
+                    x.source = x.id
+                    x.lineno = node.lineno
+                    x.ctx = ast.Load()
+                    yield self._compile(x,mode='eval')
+            else:
+                x = node.targets[0]
+                x.source = x.id
+                x.lineno = node.lineno
+                x.ctx = ast.Load()
+                yield self._compile(x,mode='eval')
 
     def visit(self, node, start_lineno,raw,depth=0):
         """Visit a node."""
@@ -135,6 +179,12 @@ class Visitor(ast.NodeTransformer):
 
 class Litter(object):
     def __init__(self,figdir='',stop_on_error=True,ipython_style=False,loglevel='WARNING',inputfilename='',inputfile=None,outputfilename='',outputfile=None,**kwargs):
+        from pygments import highlight
+        from pygments.lexers import PythonLexer
+        from pygments.formatters import LatexFormatter
+        self.lexer = PythonLexer()
+        self.formatter = LatexFormatter(full=False)
+        self.highlight = highlight
         self.plt = None
         if figdir:
             self._figdir = figdir
@@ -191,9 +241,9 @@ class Litter(object):
                 if line.startswith('#coding'):
                         continue
                 elif line.startswith('#'):
-                    chunk.write(line[1:])
+                    yield (linenumber,code,line[1:])
                 else:
-                    chunk.write(line)
+                    yield (linenumber,code,line)
             else:
                 if not code:
                     yield (linenumber,code,chunk.getvalue())
@@ -256,8 +306,14 @@ class Litter(object):
                     yield from self._saveallfigures(result)
                     if result.traceback and self.stop_on_error:
                         raise StopIteration
-            else:
+            elif source.startswith('latex') and globals()['__MARKUP__'] == 'MARKDOWN':
+                continue
+            elif source.startswith('latex'):
+                yield (code,source[5:])
+            elif source.startswith('litter'):
                 yield (code,source.format(self.globallocal))
+            else:
+                yield (code,source)
 
     def inter(self):
         from IPython.terminal.embed import InteractiveShellEmbed
@@ -277,34 +333,65 @@ class Litter(object):
         def writetmp(tmp):
             val = tmp.getvalue()
             if val:
-                self.outputfile.write(b'\n~~~python\n')
-                self.outputfile.write(val.encode('utf-8'))
-                self.outputfile.write(b'~~~\n\n')
+                if globals()['__MARKUP__'] == 'MARKDOWN':
+                    self.outputfile.write(b'\n~~~python\n')
+                    self.outputfile.write(val.encode('utf-8'))
+                    self.outputfile.write(b'~~~\n\n')
+                elif globals()['__MARKUP__'] == 'LATEX':
+                    self.outputfile.write(self.highlight(val, self.lexer, self.formatter).encode('utf-8'))
                 tmp.seek(0)
                 tmp.truncate()
+
+        if globals()['__MARKUP__'] == 'LATEX':
+            self.outputfile.write(PREAMBLE.encode('utf-8'))
+            self.outputfile.write(self.formatter.get_style_defs().encode('utf-8'))
+            self.outputfile.write(b'\\begin{document}')
 
         for (code,result) in self.process():
             if not code:
                 if wascode and tmp.tell():
                     writetmp(tmp)
                     wascode = False
-                if not '#>' in result:
+                if globals()['__MARKUP__'] == 'MARKDOWN':
                     self.outputfile.write(result.encode('utf-8'))
-            else:
+                elif globals()['__MARKUP__'] == 'LATEX':
+                    if result.startswith('###'):
+                        self.outputfile.write(
+                            ('\\subsubsection*{%s}\n'%result[3:].strip()).encode('utf-8'))
+                    elif result.startswith('##'):
+                        self.outputfile.write(
+                            ('\\subsection*{%s}\n'%result[2:].strip()).encode('utf-8'))
+                    elif result.startswith('#'):
+                        self.outputfile.write(
+                            ('\\section*{%s}\n'%result[1:].strip()).encode('utf-8'))
+                    else:
+                        self.outputfile.write(result.encode('utf-8'))
+            elif code and not '#~' in result.codechunk.source:
                 wascode = True
                 self.format_result(tmp,result)
+            else:
+                if wascode and tmp.tell():
+                    writetmp(tmp)
+                    wascode = False
+                self.outputfile.write(result.out.encode('utf-8'))
+                self.outputfile.write(b'\n')
+
         writetmp(tmp)
+
+        if globals()['__MARKUP__'] == 'LATEX':
+            self.outputfile.write(b'\end{document}')
         for (label,ref) in self.reference.items():
             self.outputfile.write('\n[{0}]: {1}\n'.format(label,ref).encode('utf-8'))
 
     def format_result(self,out,res):
-        if not '#>' in res.codechunk.source and res.codechunk.source:
+        source = res.codechunk.source
+        if not '#>' in source and source:
             if self.ipythonstyle:
                 out.write('In [{0}]: '.format(res.codechunk.codeobject.co_firstlineno))
-                out.write(res.codechunk.source)
+                out.write(source)
                 out.write('\n')
             elif not res.codechunk.mode == 'eval':
-                out.write(res.codechunk.source)
+                out.write(source)
                 out.write('\n')
         if res.stdout:
             out.write(res.stdout)
@@ -315,11 +402,15 @@ class Litter(object):
         if res.traceback:
             out.write(res.traceback)
             out.write('\n')
-        elif self.autoprinting and res.codechunk.mode == 'eval' and \
-                not '#>' in res.codechunk.source and not '#:' in res.codechunk.source:
+        if self.autoprinting and res.codechunk.mode == 'eval' and \
+                not ('#>' in source and not '#~' in source) and not '#:' in source:
             line = res.codechunk.codeobject.co_firstlineno
-            coa = res.codechunk.source
-            result = res.out
+            if '#' in source:
+                coa = source[:source.find('#')]
+                result = '{0} {1}'.format(res.out,source[source.rfind('#')+2:])
+            else:
+                coa = source
+                result = res.out
             if self.ipythonstyle:
                 try:
                     out.write('Out[{0}]: {1:.5g}'.format(line,result))
@@ -388,6 +479,8 @@ d.nest('process',process,'process the python input')
 
 @process.command(name='md',usage='inputfile -o outpufile')
 def process_md(inputfilename,outputfilename='',**kwargs):
+    global __MARKUP__
+    __MARKUP__ = 'MARKDOWN'
     if not outputfilename:
         with io.BytesIO() as tmp:
             li = Litter(outputfile=tmp,inputfilename=inputfilename,figdir=os.path.abspath('.'),**kwargs)
@@ -403,6 +496,8 @@ def process_md(inputfilename,outputfilename='',**kwargs):
 def process_pdf(inputfilename,outputfilename,**kwargs):
     from sh import pandoc
     import tempfile
+    global __MARKUP__
+    __MARKUP__ = 'MARKDOWN'
     with tempfile.NamedTemporaryFile() as tmp:
         li = Litter(outputfile=tmp.file,inputfilename=inputfilename,figdir=os.path.abspath(os.path.dirname(outputfilename)),**kwargs)
         li.format()
@@ -412,19 +507,32 @@ def process_pdf(inputfilename,outputfilename,**kwargs):
             '--template',os.path.join(
                 os.path.dirname(__file__),'data','template.tex'),'-V','version=%s'%kwargs.get('version'),'--highlight-style',kwargs.get('highlighting_style'))
 
+@process.command(name='latex',usage='inputfile -o outpufile')
+def process_latex(inputfilename,outputfilename,**kwargs):
+    global __MARKUP__
+    __MARKUP__ = 'LATEX'
+    if not outputfilename:
+        with io.BytesIO() as tmp:
+            li = Litter(outputfile=tmp,inputfilename=inputfilename,figdir=os.path.abspath('.'),**kwargs)
+            li.format()
+            tmp.seek(0)
+            sys.stdout.write(tmp.read().decode('utf-8'))
+    else:
+        li = Litter(outputfilename=outputfilename,inputfilename=inputfilename,**kwargs)
+        li.format()
+
 
 @d.command(usage='input output')
 def mdto(inputfilename,outputfilename,highlight='pygments'):
     """ convert markdown to pdf using pandoc"""
     from sh import pandoc
-    pandoc(inputfilename,'-o',outputfilename,'--highlight-style',highlight,
+    pandoc('-f','markdown',inputfilename,'-o',outputfilename,'--highlight-style',highlight,
         '--template',os.path.join(
             os.path.dirname(__file__),'data','template.tex'),'-V','version=0.0.1')
 
 @d.command(usage='input')
 def run(inputfilename):
-    from sh import python
-    python('-i',inputfilename)
+    pass
 
 def main():
     d.dispatch()
